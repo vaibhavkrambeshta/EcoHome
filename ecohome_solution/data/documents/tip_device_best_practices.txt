@@ -1,0 +1,5 @@
+Device scheduling best practices
+
+For EV charging, meet the required departure state of charge first, then use the cheapest suitable hours or available solar surplus. Do not delay charging past a travel requirement merely to chase a small estimated saving.
+
+Run pool pumps for the circulation time required by the pool and local conditions; distribute runs to avoid creating a single sharp load peak when appropriate. For dishwashers and laundry equipment, use manufacturer-approved delay-start settings and preserve sanitation, maintenance, and household needs.

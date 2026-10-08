@@ -1,0 +1,5 @@
+Smart home automation tips
+
+Coordinate flexible loads with both tariff and solar forecasts. Prefer a small number of explicit automations with clear comfort limits: delay a dishwasher or water heater during a peak-price window, and resume it in a lower-cost or solar-rich period.
+
+Use occupancy and device-completion signals instead of rigid schedules where practical. Keep a manual override for safety and convenience, and review automation results monthly so a shifted load does not simply create a new peak elsewhere.

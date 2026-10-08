@@ -1,0 +1,5 @@
+HVAC optimization strategies
+
+During cooling season, begin near 78 F (26 C) when home and health conditions allow; during heating season, try 68 F (20 C). Adjust gradually and prioritize occupant comfort, humidity, and health needs. Each degree of setback can reduce heating or cooling demand, but savings vary by building and weather.
+
+Use a schedule that relaxes heating or cooling while the home is empty, then pre-condition modestly before occupants return. Clean or replace filters on schedule, seal obvious drafts, and keep supply and return vents unobstructed. Avoid large thermostat swings that force long recovery runs.

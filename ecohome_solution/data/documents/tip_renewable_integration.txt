@@ -1,0 +1,5 @@
+Renewable energy integration
+
+Run flexible appliances while rooftop solar is producing, especially when forecast production exceeds the home's essential daytime load. Match the appliance window to the solar forecast rather than assuming every bright day produces the same output; clouds, season, shading, and system size matter.
+
+Schedule EV charging to absorb surplus solar when the vehicle is home. If export compensation is low, self-consumption can be valuable, but compare the avoided import price with the export credit and do not discharge a battery if it would later need expensive grid charging.

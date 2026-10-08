@@ -1,0 +1,5 @@
+Energy storage optimization
+
+Use a home battery to store surplus solar when the value of later avoided imports exceeds the value of exporting now, accounting for round-trip efficiency and any degradation cost. Keep the configured backup reserve needed for outages and household priorities.
+
+For time-of-use tariffs, charge from the grid only when the expected later price spread exceeds charging losses and applicable fees. Avoid repeatedly cycling the battery for small price differences; use the battery manufacturer's operating limits and warranty guidance.
