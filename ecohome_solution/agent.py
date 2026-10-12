@@ -129,10 +129,12 @@ def _format_citations(tips: dict[str, Any]) -> str:
 def build_energy_advisor(
     db_path: str | Path | None = None,
     model: Any | None = None,
+    *,
+    instructions: str = ENERGY_ADVISOR_SYSTEM_PROMPT,
 ):
     """Build the advisor graph, optionally using a configured chat model."""
     database = Path(db_path) if db_path else DEFAULT_DB_PATH
-    response_agent = Agent(ENERGY_ADVISOR_SYSTEM_PROMPT, model) if model is not None else None
+    response_agent = Agent(instructions, model) if model is not None else None
 
     def classify_request(state: AdvisorState) -> dict[str, Any]:
         intent, device = _classify(state["question"])

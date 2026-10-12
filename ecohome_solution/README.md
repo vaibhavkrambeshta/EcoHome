@@ -58,7 +58,7 @@ python -m ipykernel install --user --name ecohome --display-name "Python (EcoHom
 
 If PowerShell blocks environment activation, allow it for the current terminal with `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then activate again. Alternatively, invoke the environment's Python directly as `\.venv\Scripts\python.exe` without activating it.
 
-Dependencies include LangGraph for graph orchestration, ChromaDB for persistent local retrieval, and Jupyter/ipykernel for the notebooks. There is no API key or external service configuration in the current sample implementation.
+Dependencies include LangGraph for graph orchestration, ChromaDB for persistent local retrieval, Jupyter/ipykernel for the notebooks, and LangChain OpenAI support for model-backed notebook inference and evaluation. The deterministic Python advisor needs no API key. For the evaluation notebook, place `OPENAI_API_KEY=your-key` in a local `.env` file in the project directory or configure it in the kernel environment. `.env` is excluded by `.gitignore`; never commit credentials.
 
 ## Initialize and run with notebooks
 
@@ -66,7 +66,7 @@ Open the three notebooks in VS Code. Select the `Python (EcoHome)` kernel for ea
 
 1. `01_db_setup.ipynb` creates `data/energy_data.db`. It seeds seven days of hourly device history and hourly price, weather, and solar records extending through the next seven days. The notebook also prints table counts and device totals.
 2. `02_rag_setup.ipynb` indexes paragraphs from `data/documents/*.txt` into the persistent Chroma collection and demonstrates a retrieval query.
-3. `03_run_and_evaluate.ipynb` runs ten structured scenarios and reports response-quality and tool-usage scores, their explanations, strengths, weaknesses, and improvement recommendations.
+3. Set `OPENAI_API_KEY` in `.env` or the notebook kernel environment, then run `03_run_and_evaluate.ipynb` with the `Python (EcoHome)` kernel. It passes `ECOHOME_SYSTEM_PROMPT` into the configured agent, evaluates ten structured scenarios across response and tool-trajectory dimensions, and uses the model to recommend improvements from the recorded evaluation evidence.
 
 The database setup is repeatable but resets and reseeds the sample tables. Do not rerun it if you have replaced the sample database with household data you want to keep.
 

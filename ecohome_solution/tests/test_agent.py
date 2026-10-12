@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from agent import Agent, ENERGY_ADVISOR_SYSTEM_PROMPT, ask_energy_advisor
+from agent import Agent, ENERGY_ADVISOR_SYSTEM_PROMPT, ask_energy_advisor, build_energy_advisor
 from models.energy import initialize_database
 from tools import create_rag_index
 
@@ -71,6 +71,16 @@ class EnergyAdvisorIntegrationTests(unittest.TestCase):
         self.assertEqual(model.messages[0].content, ENERGY_ADVISOR_SYSTEM_PROMPT)
         self.assertIn("Schedule EV charging.", model.messages[1].content)
         self.assertIn('"solar_kwh": 4', model.messages[1].content)
+
+    def test_graph_passes_configured_instructions_to_model(self) -> None:
+        model = RecordingModel()
+        instructions = "Notebook-specific energy advisor instructions."
+        advisor = build_energy_advisor(model=model, instructions=instructions)
+
+        result = advisor.invoke({"question": "When should I charge my EV tomorrow?"})
+
+        self.assertEqual(result["answer"], "Grounded recommendation.")
+        self.assertEqual(model.messages[0].content, instructions)
 
 
 if __name__ == "__main__":
