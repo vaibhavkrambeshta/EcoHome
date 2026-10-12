@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from models.energy import DEFAULT_DB_PATH
 from tools import (
@@ -43,6 +45,38 @@ class AdvisorState(TypedDict, total=False):
     investment_cost_usd: float
     annual_savings_usd: float
     incentives_usd: float
+
+
+class Agent:
+    """Invoke a chat model with the advisor instructions and gathered evidence."""
+
+    def __init__(self, instructions: str, model: Any) -> None:
+        if not instructions.strip():
+            raise ValueError("Agent instructions must not be empty.")
+        if model is None or not callable(getattr(model, "invoke", None)):
+            raise TypeError("Agent model must provide an invoke(messages) method.")
+        self.instructions = instructions
+        self.model = model
+
+    def invoke(self, question: str, context: dict[str, Any]) -> str:
+        """Generate a recommendation from the question and its gathered context."""
+        if not question.strip():
+            raise ValueError("Please provide an energy optimization question.")
+        prompt = (
+            f"Question:\n{question}\n\n"
+            "Evidence and tool results (use only what is relevant):\n"
+            f"{json.dumps(context, indent=2, default=str)}"
+        )
+        response = self.model.invoke(
+            [
+                SystemMessage(content=self.instructions),
+                HumanMessage(content=prompt),
+            ]
+        )
+        content = getattr(response, "content", response)
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("The configured model returned an empty or non-text response.")
+        return content.strip()
 
 
 _DEVICE_TERMS = (
@@ -81,16 +115,24 @@ def _classify(question: str) -> tuple[str, str | None]:
     return "general_advice", None
 
 
-def _format_citations(tips: list[dict[str, str]]) -> str:
+def _format_citations(tips: dict[str, Any]) -> str:
     if not tips:
         return ""
-    unique_sources = list(dict.fromkeys(tip["source"] for tip in tips))
+    unique_sources = list(dict.fromkeys(
+        tip["source"] for tip in tips.get("results", [])
+    ))
+    if not unique_sources:
+        return ""
     return "\n\nKnowledge base: " + ", ".join(f"[{source}]" for source in unique_sources)
 
 
-def build_energy_advisor(db_path: str | Path | None = None):
-    """Build the compiled LangGraph advisor. No external LLM credentials are needed."""
+def build_energy_advisor(
+    db_path: str | Path | None = None,
+    model: Any | None = None,
+):
+    """Build the advisor graph, optionally using a configured chat model."""
     database = Path(db_path) if db_path else DEFAULT_DB_PATH
+    response_agent = Agent(ENERGY_ADVISOR_SYSTEM_PROMPT, model) if model is not None else None
 
     def classify_request(state: AdvisorState) -> dict[str, Any]:
         intent, device = _classify(state["question"])
@@ -103,16 +145,40 @@ def build_energy_advisor(db_path: str | Path | None = None):
     def gather_context(state: AdvisorState) -> dict[str, Any]:
         target_day = state["target_date"]
         context: dict[str, Any] = {"warnings": []}
+        tool_calls: list[dict[str, Any]] = []
+
+        def call_tool(
+            name: str,
+            inputs: dict[str, Any],
+            tool: Callable[..., Any],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            call = {"name": name, "input": inputs, "status": "running"}
+            tool_calls.append(call)
+            try:
+                result = tool(*args, **kwargs)
+            except Exception as error:
+                call["status"] = "failed"
+                call["error"] = str(error)
+                raise
+            call["status"] = "completed"
+            return result
+
         if state["intent"] == "schedule" and state.get("device"):
             try:
                 # A weekly optimizer chooses both a date and a time; use that date below.
                 if "week" in state["question"].lower():
-                    context["schedule"] = optimize_device_schedule_this_week(
-                        state["device"], database
+                    context["schedule"] = call_tool(
+                        "optimize_device_schedule_this_week",
+                        {"device": state["device"]},
+                        optimize_device_schedule_this_week, state["device"], database,
                     )
                 else:
-                    context["schedule"] = optimize_device_schedule(
-                        state["device"], target_day, database
+                    context["schedule"] = call_tool(
+                        "optimize_device_schedule",
+                        {"device": state["device"], "target_date": target_day.isoformat()},
+                        optimize_device_schedule, state["device"], target_day, database,
                     )
                 target_day = date.fromisoformat(context["schedule"]["date"])
             except (OSError, ValueError, RuntimeError) as error:
@@ -123,24 +189,48 @@ def build_energy_advisor(db_path: str | Path | None = None):
             ("solar", get_solar_generation),
         ):
             try:
-                context[key] = tool(target_day, database)
+                context[key] = call_tool(
+                    tool.__name__,
+                    {"target_date": target_day.isoformat()},
+                    tool,
+                    target_day,
+                    database,
+                )
             except (OSError, ValueError, RuntimeError) as error:
                 context["warnings"].append(str(error))
         try:
-            context["tips"] = retrieve_energy_tips(state["question"])
+            context["tips"] = call_tool(
+                "retrieve_energy_tips",
+                {"query": state["question"]},
+                retrieve_energy_tips,
+                state["question"],
+            )
         except (OSError, ValueError, RuntimeError) as error:
-            context["tips"] = []
+            context["tips"] = {"query": state["question"], "count": 0, "results": []}
             context["warnings"].append(f"Knowledge retrieval unavailable: {error}")
         if state["intent"] in ("historical_advice", "general_advice"):
             try:
-                context["history"] = summarize_usage_history(db_path=database)
+                context["history"] = call_tool(
+                    "summarize_usage_history",
+                    {"days": 7},
+                    summarize_usage_history,
+                    db_path=database,
+                )
             except (OSError, ValueError, RuntimeError) as error:
                 context["warnings"].append(f"Usage history unavailable: {error}")
+        context["tool_calls"] = tool_calls
         context["recommendation_date"] = target_day
         # Avoid presenting payback unless both user-provided financial inputs exist.
         if "investment_cost_usd" in state and "annual_savings_usd" in state:
             try:
-                context["roi"] = calculate_roi(
+                context["roi"] = call_tool(
+                    "calculate_roi",
+                    {
+                        "investment_cost_usd": state["investment_cost_usd"],
+                        "annual_savings_usd": state["annual_savings_usd"],
+                        "incentives_usd": state.get("incentives_usd", 0.0),
+                    },
+                    calculate_roi,
                     state["investment_cost_usd"],
                     state["annual_savings_usd"],
                     state.get("incentives_usd", 0.0),
@@ -151,6 +241,8 @@ def build_energy_advisor(db_path: str | Path | None = None):
 
     def compose_recommendation(state: AdvisorState) -> dict[str, str]:
         context = state["context"]
+        if response_agent is not None:
+            return {"answer": response_agent.invoke(state["question"], context)}
         target_day = context.get("recommendation_date", state["target_date"])
         lines = [
             f"EcoHome Energy Advisor | {target_day.strftime('%A, %B')} {target_day.day}, {target_day.year}"
@@ -206,7 +298,7 @@ def build_energy_advisor(db_path: str | Path | None = None):
                     f"The forecast averages {context['weather']['average_temperature_c']:.1f} C "
                     f"with {context['weather']['conditions']} conditions."
                 )
-        else:
+        elif state["intent"] in ("historical_advice", "general_advice"):
             history = context.get("history", [])
             if history:
                 biggest = history[0]

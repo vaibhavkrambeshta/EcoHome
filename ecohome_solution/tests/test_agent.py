@@ -1,8 +1,15 @@
 import unittest
+from types import SimpleNamespace
 
-from agent import ask_energy_advisor
+from agent import Agent, ENERGY_ADVISOR_SYSTEM_PROMPT, ask_energy_advisor
 from models.energy import initialize_database
 from tools import create_rag_index
+
+
+class RecordingModel:
+    def invoke(self, messages):
+        self.messages = messages
+        return SimpleNamespace(content="Grounded recommendation.")
 
 
 class EnergyAdvisorIntegrationTests(unittest.TestCase):
@@ -54,6 +61,16 @@ class EnergyAdvisorIntegrationTests(unittest.TestCase):
         )
         self.assertIn("net cost $1000.00", answer)
         self.assertIn("simple payback 2.5 years", answer)
+
+    def test_agent_passes_instructions_question_and_context_to_model(self) -> None:
+        model = RecordingModel()
+        agent = Agent(ENERGY_ADVISOR_SYSTEM_PROMPT, model)
+        answer = agent.invoke("Schedule EV charging.", {"solar_kwh": 4})
+
+        self.assertEqual(answer, "Grounded recommendation.")
+        self.assertEqual(model.messages[0].content, ENERGY_ADVISOR_SYSTEM_PROMPT)
+        self.assertIn("Schedule EV charging.", model.messages[1].content)
+        self.assertIn('"solar_kwh": 4', model.messages[1].content)
 
 
 if __name__ == "__main__":

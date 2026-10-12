@@ -207,19 +207,17 @@ def create_rag_index(
             ids.append(f"{path.stem}-{index}")
     if not documents:
         raise ValueError(f"No .txt knowledge documents found in {documents_dir}.")
-    client = chromadb.PersistentClient(path=str(vectorstore_dir))
-    try:
+    with chromadb.PersistentClient(path=str(vectorstore_dir)) as client:
         # Rebuild the collection so removed or edited source paragraphs cannot linger.
-        client.delete_collection("energy_tips")
-    except Exception:
-        pass
-    collection = client.create_collection("energy_tips", metadata={"hnsw:space": "cosine"})
-    collection.add(
-        ids=ids,
-        documents=documents,
-        metadatas=metadatas,
-        embeddings=[_hashed_embedding(text) for text in documents],
-    )
+        if any(getattr(item, "name", item) == "energy_tips" for item in client.list_collections()):
+            client.delete_collection("energy_tips")
+        collection = client.create_collection("energy_tips", metadata={"hnsw:space": "cosine"})
+        collection.add(
+            ids=ids,
+            documents=documents,
+            metadatas=metadatas,
+            embeddings=[_hashed_embedding(text) for text in documents],
+        )
     return len(documents)
 
 
@@ -228,38 +226,62 @@ def retrieve_energy_tips(
     top_k: int = 3,
     vectorstore_dir: str | Path = VECTORSTORE_DIR,
     documents_dir: str | Path = DOCUMENTS_DIR,
-) -> list[dict[str, str]]:
-    """Retrieve cited tips from Chroma, falling back to local lexical ranking."""
+) -> dict[str, Any]:
+    """Return relevant cited tips, building the local Chroma index when needed."""
     if top_k < 1:
         raise ValueError("top_k must be at least 1")
     store_path = Path(vectorstore_dir)
-    if store_path.exists():
-        try:
-            import chromadb
+    import chromadb
 
-            collection = chromadb.PersistentClient(path=str(store_path)).get_collection("energy_tips")
-            result = collection.query(
-                query_embeddings=[_hashed_embedding(query)],
-                n_results=top_k,
-                include=["documents", "metadatas"],
-            )
-            return [
-                {"text": text, "source": metadata["source"]}
-                for text, metadata in zip(result["documents"][0], result["metadatas"][0])
-            ]
-        except Exception:
-            pass
-    # Keep advice available before Chroma is built or when the local index cannot load.
-    query_words = set(re.findall(r"[a-z0-9]+", query.lower()))
-    ranked: list[tuple[int, str, str]] = []
-    for path in Path(documents_dir).glob("*.txt"):
+    with chromadb.PersistentClient(path=str(store_path)) as client:
+        collections = client.list_collections()
+        if not any(getattr(item, "name", item) == "energy_tips" for item in collections):
+            create_rag_index(documents_dir=documents_dir, vectorstore_dir=store_path)
+        collection = client.get_collection("energy_tips")
+        result = collection.query(
+            query_embeddings=[_hashed_embedding(query)],
+            n_results=top_k,
+            include=["documents", "metadatas"],
+        )
+    vector_results = [
+        {"text": text, "source": metadata["source"]}
+        for text, metadata in zip(result["documents"][0], result["metadatas"][0])
+    ]
+
+    stop_words = {
+        "a", "an", "and", "are", "as", "based", "can", "for", "how", "i",
+        "in", "is", "it", "my", "of", "on", "or", "the", "to", "what",
+        "when", "with",
+    }
+    query_words = set(re.findall(r"[a-z0-9]+", query.lower())) - stop_words
+    lexical_scores: dict[tuple[str, str], int] = {}
+    for path in sorted(Path(documents_dir).glob("*.txt")):
         for paragraph in re.split(r"\n\s*\n", path.read_text(encoding="utf-8")):
             text = paragraph.strip()
             if text:
-                score = len(query_words & set(re.findall(r"[a-z0-9]+", text.lower())))
-                ranked.append((score, path.name, text))
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    return [{"text": text, "source": source} for score, source, text in ranked[:top_k] if score > 0]
+                document_words = set(re.findall(r"[a-z0-9]+", text.lower()))
+                score = len(query_words & document_words)
+                if score:
+                    lexical_scores[(path.name, text)] = score
+
+    vector_ranks = {
+        (tip["source"], tip["text"]): rank for rank, tip in enumerate(vector_results)
+    }
+    candidates = set(vector_ranks) | set(lexical_scores)
+    ordered = sorted(
+        candidates,
+        key=lambda key: (
+            -lexical_scores.get(key, 0),
+            vector_ranks.get(key, len(vector_ranks)),
+            key[0],
+            key[1],
+        ),
+    )
+    results = [
+        {"source": source, "text": text}
+        for source, text in ordered[:top_k]
+    ]
+    return {"query": query, "count": len(results), "results": results}
 
 
 def resolve_target_date(question: str, today: date | None = None) -> date:

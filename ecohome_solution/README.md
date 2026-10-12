@@ -2,14 +2,20 @@
 
 EcoHome is a local, LangGraph-orchestrated energy advisor for homes with rooftop solar, EVs, and flexible household loads. It analyzes sample historical usage, hourly weather/solar forecasts, and time-of-use prices; retrieves cited energy guidance; and recommends device schedules with estimated cost, solar use, savings, and avoided emissions.
 
-This repository is a Python application and notebook workflow. It does not start a web server. The current graph is deterministic and uses no hosted LLM or API key; `ENERGY_ADVISOR_SYSTEM_PROMPT` in `agent.py` specifies the grounding, safety, citation, and estimation policy for a future model-backed response node.
+This repository is a Python application and notebook workflow. It does not start a web server. The default graph remains deterministic and requires no hosted LLM or API key. To use a LangChain-compatible chat model, pass it to `build_energy_advisor(model=...)`; the model-backed `Agent` receives the question, gathered context, and `ENERGY_ADVISOR_SYSTEM_PROMPT` instructions.
+
+Fellow mates
+Brindha
+Divya
+Parvathy
+Vimala
 
 ## Capabilities
 
 - Schedule EV charging, dishwashers, pool pumps, HVAC, and washers against hourly prices and forecast solar.
 - Compare flexible-device schedules over one day or, for “this week” requests, across the next seven forecast days.
 - Query and summarize recent device consumption and costs for historical recommendations.
-- Retrieve relevant advice from a local Chroma knowledge base and cite source filenames.
+- Retrieve relevant advice from a local Chroma knowledge base, initialize a missing index automatically, and cite source filenames.
 - Estimate schedule cost and savings against a same-duration run starting at 18:00.
 - Estimate solar-offset emissions using an illustrative factor of 0.4 kg CO2e/kWh.
 - Calculate simple payback and first-year ROI when the user supplies investment, annual savings, and incentives.
@@ -60,7 +66,7 @@ Open the three notebooks in VS Code. Select the `Python (EcoHome)` kernel for ea
 
 1. `01_db_setup.ipynb` creates `data/energy_data.db`. It seeds seven days of hourly device history and hourly price, weather, and solar records extending through the next seven days. The notebook also prints table counts and device totals.
 2. `02_rag_setup.ipynb` indexes paragraphs from `data/documents/*.txt` into the persistent Chroma collection and demonstrates a retrieval query.
-3. `03_run_and_evaluate.ipynb` runs the five example questions covering EV charging, thermostat settings, historical energy use, dishwasher savings, and weekly pool-pump scheduling.
+3. `03_run_and_evaluate.ipynb` runs ten structured scenarios and reports response-quality and tool-usage scores, their explanations, strengths, weaknesses, and improvement recommendations.
 
 The database setup is repeatable but resets and reseeds the sample tables. Do not rerun it if you have replaced the sample database with household data you want to keep.
 
@@ -102,15 +108,25 @@ The ROI is simple payback and first-year ROI; it excludes financing, maintenance
 
 ## Workflow and tools
 
-The graph in `agent.py` classifies the question, gathers relevant context, and composes a response. `tools.py` provides these operations:
+The graph in `agent.py` classifies the question, gathers relevant context, and composes a response. Without a model it uses its deterministic response composer. Supply a chat model to enable the configured LLM-backed response:
+
+```python
+from agent import build_energy_advisor
+
+advisor = build_energy_advisor(model=your_langchain_compatible_chat_model)
+result = advisor.invoke({"question": "When should I charge my EV tomorrow?"})
+print(result["answer"])
+```
+
+The model receives the user question and gathered tool evidence under `ENERGY_ADVISOR_SYSTEM_PROMPT`. The independent `Agent(instructions, model).invoke(question, context)` interface is also available for callers that already have context. `tools.py` provides these operations:
 
 - `get_weather_forecast`, `get_electricity_prices`, and `get_solar_generation` read the corresponding hourly forecast data.
 - `get_usage_history` and `summarize_usage_history` query past device consumption/cost.
 - `optimize_device_schedule` evaluates contiguous hourly windows; `optimize_device_schedule_this_week` compares candidate days.
-- `create_rag_index` and `retrieve_energy_tips` build/query the local knowledge index.
+- `create_rag_index` and `retrieve_energy_tips` build/query the local knowledge index. Retrieval returns a dictionary with the original query, result count, and cited result records; a missing collection is built from local documents on demand.
 - `calculate_roi` computes user-input-based payback and first-year ROI.
 
-`ENERGY_ADVISOR_SYSTEM_PROMPT` sets policy for grounding, citations, safety and estimation. The present answer composer is deterministic: it does not call an LLM. To add a provider, implement a model-backed graph node using that policy and configure credentials outside source control.
+`ENERGY_ADVISOR_SYSTEM_PROMPT` sets policy for grounding, citations, safety, and estimation for both the deterministic guidance path and any configured model-backed response. Provider packages and credentials are supplied by the application and should remain outside source control.
 
 ### SQLite data model
 

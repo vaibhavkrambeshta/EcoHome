@@ -57,15 +57,18 @@ class EnergyToolTests(unittest.TestCase):
         self.assertEqual(resolve_target_date("charge it tomorrow", anchor), date(2026, 10, 1))
         self.assertEqual(resolve_target_date("Wednesday afternoon", anchor), date(2026, 10, 7))
 
-    def test_retrieval_uses_local_document_fallback(self) -> None:
+    def test_retrieval_initializes_missing_vectorstore(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             docs = Path(temporary_directory)
             (docs / "solar.txt").write_text("Schedule EV charging when rooftop solar is producing.", encoding="utf-8")
+            (docs / "unrelated.txt").write_text("Set a comfortable thermostat temperature in winter.", encoding="utf-8")
             results = retrieve_energy_tips(
-                "rooftop solar EV charging", documents_dir=docs,
+                "rooftop solar EV charging", top_k=1, documents_dir=docs,
                 vectorstore_dir=docs / "missing-vectorstore",
             )
-        self.assertEqual(results[0]["source"], "solar.txt")
+            self.assertEqual(results["count"], 1)
+            self.assertEqual(results["results"][0]["source"], "solar.txt")
+            self.assertTrue((docs / "missing-vectorstore" / "chroma.sqlite3").exists())
 
 
 if __name__ == "__main__":
